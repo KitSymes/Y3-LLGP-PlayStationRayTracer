@@ -25,4 +25,24 @@ TrackerManager::TrackerManager()
 {
 	if (DEBUG)
 		std::cout << "Tracker Manager Initialised" << std::endl;
+	waitingQueueResourcePool;
+	uint32_t numThreads = 16;
+	uint32_t numSyncObjects = 16;
+	size_t workAreaSize = sceUltWaitingQueueResourcePoolGetWorkAreaSize(numThreads, numSyncObjects);
+	workArea = malloc(workAreaSize);
+	sceUltWaitingQueueResourcePoolCreate(&waitingQueueResourcePool, "Thread Manager Waiting Queue", numThreads, numSyncObjects, workArea, NULL);
+	_defaultTracker.Setup("Default Tracker", &waitingQueueResourcePool);
+	_sphereTracker.Setup("Sphere Tracker", &waitingQueueResourcePool);
+	//_defaultTracker = new Tracker("Default Tracker Mutex", &waitingQueueResourcePool);
+	//_sphereTracker = new Tracker("Dummy Tracker Mutex", &waitingQueueResourcePool);
+}
+
+TrackerManager::~TrackerManager()
+{
+	sceUltWaitingQueueResourcePoolDestroy(&waitingQueueResourcePool);
+	free(workArea);
+	/*delete _sphereTracker;
+	_sphereTracker = nullptr;
+	delete _defaultTracker;
+	_defaultTracker = nullptr;*/
 }

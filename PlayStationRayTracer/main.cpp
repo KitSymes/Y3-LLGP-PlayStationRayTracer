@@ -27,6 +27,10 @@
 // Custom
 #include "Structures.h"
 #include "Sphere.h"
+#include "TrackerManager.h"
+#include <ult.h>
+#include <libsysmodule.h> 
+#include <json.hpp>
 
 
 static const size_t kOnionMemorySize = 64 * 1024 * 1024;
@@ -36,6 +40,7 @@ std::chrono::time_point<std::chrono::system_clock> end;
 std::chrono::duration<double> total_elapsed_time;
 
 static const int num_threads = 10;
+#define TRACE_THREAD_PER_LINES 60
 
 using namespace sce;
 using namespace sce::Gnmx;
@@ -45,7 +50,7 @@ using namespace sce::Gnmx;
 //[/comment]
 #define MAX_RAY_DEPTH 5
 
-float mix(const float &a, const float &b, const float &mix)
+float mix(const float& a, const float& b, const float& mix)
 {
 	return b * mix + a * (1 - mix);
 }
@@ -61,10 +66,10 @@ float mix(const float &a, const float &b, const float &mix)
 // the background color.
 //[/comment]
 Vec3f trace(
-	const Vec3f &rayorig,
-	const Vec3f &raydir,
-	const std::vector<Sphere> &spheres,
-	const int &depth)
+	const Vec3f& rayorig,
+	const Vec3f& raydir,
+	const std::vector<Sphere>& spheres,
+	const int& depth)
 {
 	//if (raydir.length() != 1) std::cerr << "Error " << raydir << std::endl;
 	float tnear = INFINITY;
@@ -108,7 +113,7 @@ Vec3f trace(
 			float ior = 1.1, eta = (inside) ? ior : 1 / ior; // are we inside or outside the surface?
 			float cosi = -nhit.dot(raydir);
 			float k = 1 - eta * eta * (1 - cosi * cosi);
-			Vec3f refrdir = raydir * eta + nhit * (eta *  cosi - sqrt(k));
+			Vec3f refrdir = raydir * eta + nhit * (eta * cosi - sqrt(k));
 			refrdir.normalize();
 			refraction = trace(phit - nhit * bias, refrdir, spheres, depth + 1);
 		}
@@ -143,18 +148,34 @@ Vec3f trace(
 	return surfaceColor + sphere->emissionColor;
 }
 
+void traceThreaded(const std::vector<Sphere>& spheres, SceUltMutex& mutex, Vec3f* image, unsigned int start, unsigned width, unsigned height, float invWidth, float invHeight, float aspectRatio, float angle)
+{
+	for (unsigned y = start; y < std::min(start + TRACE_THREAD_PER_LINES, height); ++y) {
+		for (unsigned x = 0; x < width; ++x) {
+			float xx = (2 * ((x + 0.5) * invWidth) - 1) * angle * aspectRatio;
+			float yy = (1 - 2 * ((y + 0.5) * invHeight)) * angle;
+			Vec3f raydir(xx, yy, -1);
+			raydir.normalize();
+			Vec3f pixel = trace(Vec3f(0), raydir, spheres, 0);
+			sceUltMutexLock(&mutex);
+			image[int(x + y * width)] = pixel;
+			sceUltMutexUnlock(&mutex);
+		}
+	}
+}
+
 //[comment]
 // Main rendering function. We compute a camera ray for each pixel of the image
 // trace it and return a color. If the ray hits a sphere, we return the color of the
 // sphere at the intersection point, else we return the background color.
 //[/comment]
-void render(const std::vector<Sphere> &spheres, int iteration, int threadNumber)
+void render(const std::vector<Sphere>& spheres, int iteration)
 {
 
 	//auto start = std::chrono::system_clock::now();
 
 	// Initialize the WB_ONION memory allocator
-	
+
 	LinearAllocator onionAllocator;
 	int ret = onionAllocator.initialize(
 		kOnionMemorySize, SCE_KERNEL_WB_ONION,
@@ -165,18 +186,18 @@ void render(const std::vector<Sphere> &spheres, int iteration, int threadNumber)
 
 	unsigned width = 1920, height = 1080;
 	//unsigned width = 640, height = 480;
-	size_t totalSize = sizeof(Vec3f)* width * height;
+	size_t totalSize = sizeof(Vec3f) * width * height;
 
-	void * buffer = onionAllocator.allocate(totalSize, Gnm::kAlignmentOfBufferInBytes);
+	void* buffer = onionAllocator.allocate(totalSize, Gnm::kAlignmentOfBufferInBytes);
 
-	Vec3f *image = reinterpret_cast<Vec3f *>(buffer);
-	Vec3f *pixel = image;
+	Vec3f* image = reinterpret_cast<Vec3f*>(buffer);
+	Vec3f* pixel = image;
 
 	float invWidth = 1 / float(width), invHeight = 1 / float(height);
 	float fov = 30, aspectratio = width / float(height);
 	float angle = tan(M_PI * 0.5 * fov / 180.);
 	// Trace rays
-	for (unsigned y = 0; y < height; ++y) {
+	/*for (unsigned y = 0; y < height; ++y) {
 		for (unsigned x = 0; x < width; ++x, ++pixel) {
 			float xx = (2 * ((x + 0.5) * invWidth) - 1) * angle * aspectratio;
 			float yy = (1 - 2 * ((y + 0.5) * invHeight)) * angle;
@@ -184,7 +205,47 @@ void render(const std::vector<Sphere> &spheres, int iteration, int threadNumber)
 			raydir.normalize();
 			*pixel = trace(Vec3f(0), raydir, spheres, 0);
 		}
+	}*/
+
+	uint32_t maxNumUlthread = height / TRACE_THREAD_PER_LINES;
+	uint32_t numWorkerThread = 3;
+	size_t runtimeWorkAreaSize = sceUltUlthreadRuntimeGetWorkAreaSize(maxNumUlthread, numWorkerThread);
+	void* runtimeWorkArea = malloc(runtimeWorkAreaSize);
+	SceUltUlthreadRuntime runtime;
+	sceUltUlthreadRuntimeCreate(&runtime, "Render Runtime", maxNumUlthread, numWorkerThread, runtimeWorkArea, NULL);
+
+	std::vector<SceUltUlthread> traceThreads;
+
+	for (unsigned int y = 0; y < height; y += TRACE_THREAD_PER_LINES)
+	{
+		if (y > height)
+			continue;
+		SceUltUlthread ulthread;
+		uint64_t arg = 0; /* Argument of entry function */
+		uint64_t sizeContext = sizeof(); /* Context buffer size */
+		/* Buffer for execution context of user level thread */
+		void* contextBuffer = malloc(sizeContext);
+		sceUltUlthreadCreate(&ulthread,
+			"name",
+			traceThreaded,
+			arg,
+			NULL,
+			0,
+			&runtime,
+			NULL);
+		//traceThreads.push_back(std::thread(traceThreaded,
+			//	spheres,			mutex,			image,			start,	width, height, invWidth, invHeight, aspectRatio, angle)
+			//std::cref(spheres), std::ref(mutex), std::ref(image), y, width, height, invWidth, invHeight, aspectratio, angle));
 	}
+
+	for (SceUltUlthread& t : traceThreads)
+	{
+		int32_t status;
+		sceUltUlthreadJoin(&t, &status);
+	}
+	sceUltUlthreadRuntimeDestroy(&runtime);
+	free(runtimeWorkArea);
+
 	// Save result to a PPM image (keep these flags if you compile under Windows)
 	std::stringstream ss;
 	ss << "/app0/spheres" << iteration << ".ppm";
@@ -201,25 +262,119 @@ void render(const std::vector<Sphere> &spheres, int iteration, int threadNumber)
 	ofs.close();
 }
 
+void LoadScene(std::vector<Sphere>& spheres)
+{
+	std::ifstream f("/app0/scene.json");
+	nlohmann::json data = nlohmann::json::parse(f);
+
+	for (nlohmann::json::iterator it = data["spheres"].begin(); it != data["spheres"].end(); ++it) {
+		auto sphere = it.value();
+		Vec3f centre = Vec3f(sphere["center"][0], sphere["center"][1], sphere["center"][2]);
+		Vec3f surfaceColor = Vec3f(sphere["surfaceColor"][0], sphere["surfaceColor"][1], sphere["surfaceColor"][2]);
+		Vec3f emissionColor = Vec3f(sphere["emissionColor"][0], sphere["emissionColor"][1], sphere["emissionColor"][2]);
+		spheres.push_back(Sphere(centre,
+			sphere["radius"],
+			surfaceColor,
+			sphere["reflection"],
+			sphere["transparency"],
+			emissionColor));
+	}
+}
+
 void BasicRender(int iteration)
 {
 	std::vector<Sphere> spheres;
-
-	spheres.push_back(Sphere(Vec3f(0.0, -10004, -20), 10000, Vec3f(0.20, 0.20, 0.20), 0, 0.0));
+	LoadScene(spheres);
+	spheres[1].center.x = iteration;
+	/*spheres.push_back(Sphere(Vec3f(0.0, -10004, -20), 10000, Vec3f(0.20, 0.20, 0.20), 0, 0.0));
 	spheres.push_back(Sphere(Vec3f(iteration, 0, -20), 1, Vec3f(1.00, 0.32, 0.36), 1, 0.5)); // Radius++ change here
 	spheres.push_back(Sphere(Vec3f(5.0, -1, -15), 2, Vec3f(0.90, 0.76, 0.46), 1, 0.0));
-	spheres.push_back(Sphere(Vec3f(5.0, 0, -25), 3, Vec3f(0.65, 0.77, 0.97), 1, 0.0));
-	render(spheres, iteration, 1);
+	spheres.push_back(Sphere(Vec3f(5.0, 0, -25), 3, Vec3f(0.65, 0.77, 0.97), 1, 0.0));*/
+
+	render(spheres, iteration);
 
 	spheres.clear();
 }
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
-	for (int i = 0; i < 1; i++)
+	int ret = SCE_OK;
+
+	ret = sceSysmoduleLoadModule(SCE_SYSMODULE_ULT);
+	assert(ret == SCE_OK);
+
+	srand(13);
+
+	using std::chrono::high_resolution_clock;
+	using std::chrono::duration_cast;
+	using std::chrono::duration;
+	using std::chrono::milliseconds;
+
+	int count = 10;
+	int total = 0;
+	for (int i = 0; i < count; i++)
 	{
+		auto t1 = high_resolution_clock::now();
 		BasicRender(i);
+		auto t2 = high_resolution_clock::now();
+
+		auto t_int = duration_cast<milliseconds>(t2 - t1);
+
+		std::cout << t_int.count() << " ms seconds\n";
+		total += t_int.count();
 	}
-	
+
+	std::cout << (total / count) << " average ms seconds\n";
+
 	return 0;
+}
+
+void* operator new(size_t size)
+{
+	size_t bytes = size + sizeof(Header) + sizeof(Footer);
+	//std::cout << "new " << size << " reqeusted, allocating " << bytes << std::endl;
+	char* pMem = (char*)malloc(bytes);
+
+	Header* header = (Header*)pMem;
+	header->size = size;
+	header->next = nullptr;
+	header->prev = nullptr;
+	header->checkvalue = 0xDEAD;
+	TrackerManager::GetInstance().GetDefaultTracker()->Add(header);
+
+	Footer* footer = (Footer*)(pMem + sizeof(Header) + size);
+	footer->checkvalue = 0xC0DE;
+
+	void* pStartMemBlock = pMem + sizeof(Header);
+	return pStartMemBlock;
+}
+
+void* operator new(size_t size, Tracker* tracker)
+{
+	size_t bytes = size + sizeof(Header) + sizeof(Footer);
+	//std::cout << "new " << size << " reqeusted, allocating " << bytes << std::endl;
+	char* pMem = (char*)malloc(bytes);
+
+	Header* header = (Header*)pMem;
+	header->size = size;
+	header->next = nullptr;
+	header->prev = nullptr;
+	header->checkvalue = 0xDEAD;
+	tracker->Add(header);
+
+	Footer* footer = (Footer*)(pMem + sizeof(Header) + size);
+	footer->checkvalue = 0xC0DE;
+
+	void* pStartMemBlock = pMem + sizeof(Header);
+	return pStartMemBlock;
+}
+
+void operator delete(void* pMem)
+{
+	Header* header = (Header*)((char*)pMem - sizeof(Header));
+	Footer* footer = (Footer*)((char*)pMem + header->size);
+
+	//std::cout << "freeing " << header->size << " (" << (header->size + sizeof(Header) + sizeof(Footer)) << ")" << std::endl;
+	header->tracker->Remove(header);
+	free(header);
 }

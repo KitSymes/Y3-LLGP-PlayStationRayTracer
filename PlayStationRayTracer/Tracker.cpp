@@ -13,11 +13,27 @@ Tracker::Tracker()
 
 Tracker::~Tracker()
 {
+	if (!setup)
+		return;
+
+	sceUltMutexDestroy(&mutex);
+}
+
+void Tracker::Setup(const char* name, SceUltWaitingQueueResourcePool* waitingQueueResourcePool)
+{
+	if (setup)
+		return;
+
+	sceUltMutexCreate(&mutex, name, waitingQueueResourcePool, NULL);
+	setup = true;
 }
 
 void Tracker::Add(Header* header)
 {
-	m.lock();
+	if (!setup)
+		return;
+
+	sceUltMutexLock(&mutex);
 	header->tracker = this;
 	AddBytes(header->size);
 
@@ -74,12 +90,15 @@ void Tracker::Add(Header* header)
 	(*pointerToHeaderPointer) = header;
 	if (pointerToPreviousHeader != nullptr)
 		header->prev = pointerToPreviousHeader;*/
-	m.unlock();
+	sceUltMutexUnlock(&mutex);
 }
 
 void Tracker::Remove(Header* header)
 {
-	m.lock();
+	if (!setup)
+		return;
+
+	sceUltMutexLock(&mutex);
 	if (header->checkvalue != 0xDEAD)
 		std::cout << "Tracker#Remove: Incorrect Header checkvalue: " << header->checkvalue << " not " << 0xDEAD << std::endl;
 	Footer* footer = (Footer*)(((char*)header) + sizeof(Header) + header->size);
@@ -122,7 +141,7 @@ void Tracker::Remove(Header* header)
 
 	if (header == _last)
 		_last = header->prev;
-	m.unlock();
+	sceUltMutexUnlock(&mutex);
 }
 
 void Tracker::Verify(Header* header)
@@ -190,6 +209,9 @@ size_t Tracker::GetByteCount()
 
 void Tracker::AddBytes(size_t bytes)
 {
+	if (!setup)
+		return;
+
 	_bytes += bytes;
 	if (DEBUG)
 		std::cout << "Allocating " << bytes << std::endl;
@@ -197,6 +219,9 @@ void Tracker::AddBytes(size_t bytes)
 
 void Tracker::RemoveBytes(size_t bytes)
 {
+	if (!setup)
+		return;
+
 	_bytes -= bytes;
 	if (DEBUG)
 		std::cout << "Freeing " << bytes << std::endl;

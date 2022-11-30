@@ -4,8 +4,8 @@
 
 #define DEBUG false
 
-#include <mutex>
 struct Header;
+#include <ult.h>
 
 class Tracker
 {
@@ -13,6 +13,7 @@ public:
 	Tracker();
 	~Tracker();
 
+	void Setup(const char* name, SceUltWaitingQueueResourcePool* waitingQueueResourcePool);
 	void Add(Header* header);
 	void Remove(Header* header);
 
@@ -23,7 +24,8 @@ private:
 	size_t _bytes;
 	Header* _first;
 	Header* _last;
-	std::mutex m;
+	SceUltMutex mutex;
+	bool setup = false;
 
 	void AddBytes(size_t bytes);
 	void RemoveBytes(size_t bytes);
