@@ -1,0 +1,32 @@
+{
+	"spheres":
+	[{
+		"center":[0.0, -10004.0, -20.0],
+		"radius":10000.0,
+		"surfaceColor":[0.2, 0.2, 0.2],
+		"emissionColor":[0.0, 0.0, 0.0],
+		"reflection":0.0,
+		"transparency":0.0
+	},{
+		"center":[0.0, 0.0, -20.0],
+		"radius":4.0,
+		"surfaceColor":[1.0, 0.32, 0.36],
+		"emissionColor":[0.0, 0.0, 0.0],
+		"reflection":1.0,
+		"transparency":0.5
+	},{
+		"center":[5.0, -1.0, -15.0],
+		"radius":2.0,
+		"surfaceColor":[0.90, 0.76, 0.46],
+		"emissionColor":[0.0, 0.0, 0.0],
+		"reflection":1.0,
+		"transparency":0.0
+	},{
+		"center":[5.0, 0.0, -25.0],
+		"radius":3.0,
+		"surfaceColor":[0.65, 0.77, 0.97],
+		"emissionColor":[0.0, 0.0, 0.0],
+		"reflection":1.0,
+		"transparency":0.0
+	}]
+}
