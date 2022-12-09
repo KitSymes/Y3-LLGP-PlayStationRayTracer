@@ -1,5 +1,7 @@
 #include "TrackerManager.h"
 #include <iostream>
+#include <assert.h>
+#include <scetypes.h>
 
 TrackerManager& TrackerManager::GetInstance()
 {
@@ -25,7 +27,6 @@ TrackerManager::TrackerManager()
 {
 	if (DEBUG)
 		std::cout << "Tracker Manager Initialised" << std::endl;
-	waitingQueueResourcePool;
 	uint32_t numThreads = 16;
 	uint32_t numSyncObjects = 16;
 	size_t workAreaSize = sceUltWaitingQueueResourcePoolGetWorkAreaSize(numThreads, numSyncObjects);
@@ -39,7 +40,8 @@ TrackerManager::TrackerManager()
 
 TrackerManager::~TrackerManager()
 {
-	sceUltWaitingQueueResourcePoolDestroy(&waitingQueueResourcePool);
+	int32_t ret = sceUltWaitingQueueResourcePoolDestroy(&waitingQueueResourcePool);
+	assert(ret == SCE_OK);
 	free(workArea);
 	/*delete _sphereTracker;
 	_sphereTracker = nullptr;

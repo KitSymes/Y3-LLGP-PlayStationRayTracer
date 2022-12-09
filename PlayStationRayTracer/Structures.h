@@ -25,9 +25,12 @@ struct TraceWrapper
 {
 	const std::vector<Sphere*>* spheres;
 	Vec3f* image;
-	unsigned int start;
-	unsigned width;
-	unsigned height;
+	unsigned int startX;
+	unsigned int startY;
+	unsigned int sizeX;
+	unsigned int sizeY;
+	unsigned imageWidth;
+	unsigned imageHeight;
 	float invWidth;
 	float invHeight;
 	float aspectRatio;

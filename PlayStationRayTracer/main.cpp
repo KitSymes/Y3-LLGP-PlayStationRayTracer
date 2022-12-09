@@ -29,6 +29,7 @@
 #include "Sphere.h"
 #include "TrackerManager.h"
 #include <ult.h>
+#include <scetypes.h>
 #include <libsysmodule.h> 
 #include <json.hpp>
 
@@ -41,6 +42,9 @@ std::chrono::duration<double> total_elapsed_time;
 
 static const int num_threads = 10;
 #define TRACE_THREAD_PER_LINES 60
+#define SUBDIVIDE_COUNT 1
+#define THREADS 4 // 4 to the power of SUBDIVIDE_COUNT
+#define SPLIT 2 // 2 to the power of SUBDIVIDE_COUNT
 
 using namespace sce;
 using namespace sce::Gnmx;
@@ -148,25 +152,19 @@ Vec3f trace(
 	return surfaceColor + sphere->emissionColor;
 }
 
-void traceThreaded(const std::vector<Sphere*>& spheres, Vec3f* image, unsigned int start, unsigned width, unsigned height, float invWidth, float invHeight, float aspectRatio, float angle)
-{
-	for (unsigned y = start; y < std::min(start + TRACE_THREAD_PER_LINES, height); ++y) {
-		for (unsigned x = 0; x < width; ++x) {
-			float xx = (2 * ((x + 0.5) * invWidth) - 1) * angle * aspectRatio;
-			float yy = (1 - 2 * ((y + 0.5) * invHeight)) * angle;
-			Vec3f raydir(xx, yy, -1);
-			raydir.normalize();
-			Vec3f pixel = trace(Vec3f(0), raydir, spheres, 0);
-			image[int(x + y * width)] = pixel;
-		}
-	}
-}
-
-int32_t traceThreadEntry(uint64_t arg)
+int32_t traceThreaded(uint64_t arg)
 {
 	TraceWrapper* wrapper = (TraceWrapper*)arg;
-	//			spheres,				image,			start,			width,			height,				invWidth,			invHeight,			aspectRatio,			float angle
-	traceThreaded(*(wrapper->spheres),	wrapper->image,	wrapper->start,	wrapper->width,	wrapper->height,	wrapper->invWidth,	wrapper->invHeight,	wrapper->aspectRatio,	wrapper->angle);
+	for (unsigned y = wrapper->startY; y < wrapper->imageHeight && y < wrapper->startY + wrapper->sizeY; ++y) {
+		for (unsigned x = wrapper->startX; x < wrapper->imageWidth && x < wrapper->startX + wrapper->sizeX; ++x) {
+			float xx = (2 * ((x + 0.5) * wrapper->invWidth) - 1) * wrapper->angle * wrapper->aspectRatio;
+			float yy = (1 - 2 * ((y + 0.5) * wrapper->invHeight)) * wrapper->angle;
+			Vec3f raydir(xx, yy, -1);
+			raydir.normalize();
+			Vec3f pixel = trace(Vec3f(0), raydir, *wrapper->spheres, 0);
+			wrapper->image[int(x + y * wrapper->imageWidth)] = pixel;
+		}
+	}
 	return SCE_OK;
 }
 
@@ -190,8 +188,8 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 	//if (ret != SCE_OK)
 	//	return ret;
 
-	unsigned width = 1920, height = 1080;
-	//unsigned width = 640, height = 480;
+	//unsigned width = 1920, height = 1080;
+	unsigned width = 640, height = 480;
 	size_t totalSize = sizeof(Vec3f) * width * height;
 
 	void* buffer = onionAllocator.allocate(totalSize, Gnm::kAlignmentOfBufferInBytes);
@@ -203,50 +201,47 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 	float fov = 30, aspectratio = width / float(height);
 	float angle = tan(M_PI * 0.5 * fov / 180.);
 
-	uint32_t maxNumUlthread = height / TRACE_THREAD_PER_LINES;
+	uint32_t maxNumUlthread = 10;// height / TRACE_THREAD_PER_LINES;
 	uint32_t numWorkerThread = 3;
-	size_t runtimeWorkAreaSize = sceUltUlthreadRuntimeGetWorkAreaSize(maxNumUlthread, numWorkerThread);
-	void* runtimeWorkArea = malloc(runtimeWorkAreaSize);
+	void* runtimeWorkArea = malloc(sceUltUlthreadRuntimeGetWorkAreaSize(maxNumUlthread, numWorkerThread));
 	SceUltUlthreadRuntime runtime;
-	sceUltUlthreadRuntimeCreate(&runtime, "Render Runtime", maxNumUlthread, numWorkerThread, runtimeWorkArea, NULL);
+	ret = sceUltUlthreadRuntimeCreate(&runtime, "Render Runtime", maxNumUlthread, numWorkerThread, runtimeWorkArea, NULL);
+	assert(ret == SCE_OK);
 
-	std::vector<SceUltUlthread> traceThreads;
+	SceUltUlthread traceThreads[THREADS];
+	//std::vector<SceUltUlthread> traceThreads;
 
-	for (unsigned int y = 0; y < height; y += TRACE_THREAD_PER_LINES)
+	for (unsigned int i = 0; i < THREADS; i++)
 	{
-		if (y > height)
-			continue;
-
-		SceUltUlthread ulthread;
-
 		TraceWrapper wrapper;
 		wrapper.spheres = &spheres;
 		wrapper.image = image;
-		wrapper.start = y;
-		wrapper.width = width;
-		wrapper.height = height;
+		wrapper.sizeX = width / SPLIT;
+		wrapper.sizeY = height / SPLIT;
+		wrapper.startX = (i / SPLIT) * wrapper.sizeX;
+		wrapper.startY = (i % SPLIT) * wrapper.sizeY;
+		wrapper.imageWidth = width;
+		wrapper.imageHeight = height;
 		wrapper.invWidth = invWidth;
 		wrapper.invHeight = invHeight;
 		wrapper.aspectRatio = aspectratio;
 		wrapper.angle = angle;
 		uint64_t arg = (uint64_t)&wrapper;
 
-		sceUltUlthreadCreate(&ulthread,
-			"name",
-			traceThreadEntry,
+		sceUltUlthreadCreate(&traceThreads[i],
+			"trace thread",
+			traceThreaded,
 			arg,
 			NULL,
-			0,
+			NULL,
 			&runtime,
 			NULL);
-
-		traceThreads.push_back(ulthread);
 	}
 
-	for (SceUltUlthread& t : traceThreads)
+	for (unsigned int i = 0; i < THREADS; i++)
 	{
 		int32_t status;
-		sceUltUlthreadJoin(&t, &status);
+		sceUltUlthreadJoin(&traceThreads[i], &status);
 	}
 
 	sceUltUlthreadRuntimeDestroy(&runtime);
@@ -379,6 +374,9 @@ int main(int argc, char** argv)
 	ret = sceSysmoduleLoadModule(SCE_SYSMODULE_ULT);
 	assert(ret == SCE_OK);
 
+	ret = sceUltInitialize();
+	assert(ret == SCE_OK);
+
 	srand(13);
 
 	using std::chrono::high_resolution_clock;
@@ -386,7 +384,7 @@ int main(int argc, char** argv)
 	using std::chrono::duration;
 	using std::chrono::milliseconds;
 
-	int count = 10;
+	int count = 1;
 	int total = 0;
 	for (int i = 0; i < count; i++)
 	{
@@ -401,6 +399,13 @@ int main(int argc, char** argv)
 	}
 
 	std::cout << (total / count) << " average ms seconds\n";
+
+	/* libult finalize 
+	ret = sceUltFinalize();
+	assert(ret == SCE_OK);
+
+	ret = sceSysmoduleUnloadModule(SCE_SYSMODULE_ULT);
+	assert(ret == SCE_OK);*/
 
 	return 0;
 }
