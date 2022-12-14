@@ -42,9 +42,9 @@ std::chrono::duration<double> total_elapsed_time;
 
 static const int num_threads = 10;
 #define TRACE_THREAD_PER_LINES 60
-#define SUBDIVIDE_COUNT 1
-#define THREADS 4 // 4 to the power of SUBDIVIDE_COUNT
-#define SPLIT 2 // 2 to the power of SUBDIVIDE_COUNT
+#define SUBDIVIDE_COUNT 3
+#define THREADS 64 // 4 to the power of SUBDIVIDE_COUNT
+#define SPLIT 8 // 2 to the power of SUBDIVIDE_COUNT
 #define OCTREE true
 
 using namespace sce;

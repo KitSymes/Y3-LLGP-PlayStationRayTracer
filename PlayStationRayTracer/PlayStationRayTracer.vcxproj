@@ -67,12 +67,14 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Octree.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Sphere.cpp" />
     <ClCompile Include="Tracker.cpp" />
     <ClCompile Include="TrackerManager.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Octree.h" />
     <ClInclude Include="allocator.h" />
     <ClInclude Include="Sphere.h" />
     <ClInclude Include="Structures.h" />
