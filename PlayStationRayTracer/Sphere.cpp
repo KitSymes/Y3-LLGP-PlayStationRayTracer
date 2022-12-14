@@ -24,23 +24,9 @@ bool Sphere::IntersectsLine(const Vec3f& rayorig, const Vec3f& raydir, float& di
 	return true;
 }
 
-bool Sphere::IntersectsLine(Vec3f start, Vec3f end)
+bool Sphere::IntersectsPlane(Vec3f pointOnPlane, Vec3f planeNormal)
 {
-	// Closest point on the line to position (includes past start and end point), but that shouldn't matter
-	Vec3f AB = end - start;
-	Vec3f AP = center - start;
-	float lengthSqrAB = AB.x * AB.x + AB.y * AB.y;
-	float t = (AP.x * AB.x + AP.y * AB.y) / lengthSqrAB;
-	if (t < 0)
-		t = 0;
-	if (t > 1)
-		t = 1;
-	Vec3f closest = start + AB * t;
-
-	Vec3f temp = closest - center;
-	float mag = (temp.x * temp.x) + (temp.y * temp.y) + (temp.z * temp.z);
-
-	return mag <= radius2;
+	return abs((center - pointOnPlane).dot(planeNormal)) < radius;
 }
 
 void* Sphere::operator new(size_t size)
@@ -54,7 +40,7 @@ void* Sphere::operator new(size_t size)
 	header->next = nullptr;
 	header->prev = nullptr;
 	header->checkvalue = 0xDEAD;
-	TrackerManager::GetInstance().GetDefaultTracker()->Add(header);
+	TrackerManager::GetInstance().GetSphereTracker()->Add(header);
 
 	Footer* footer = (Footer*)(pMem + sizeof(Header) + size);
 	footer->checkvalue = 0xC0DE;

@@ -45,6 +45,7 @@ static const int num_threads = 10;
 #define SUBDIVIDE_COUNT 1
 #define THREADS 4 // 4 to the power of SUBDIVIDE_COUNT
 #define SPLIT 2 // 2 to the power of SUBDIVIDE_COUNT
+#define OCTREE true
 
 using namespace sce;
 using namespace sce::Gnmx;
@@ -73,11 +74,47 @@ Vec3f trace(
 	const Vec3f& rayorig,
 	const Vec3f& raydir,
 	const std::vector<Sphere*>& spheres,
-	const int& depth)
+	const int& depth,
+	Octree* oct)
 {
 	//if (raydir.length() != 1) std::cerr << "Error " << raydir << std::endl;
 	float tnear = INFINITY;
 	const Sphere* sphere = NULL;
+#if OCTREE
+	unsigned charxor = 0;
+	Vec3f dir = raydir;
+	Vec3f orig = rayorig;
+
+	if (raydir.x < 0.0)
+	{
+		orig.x = oct->GetCentre().x - rayorig.x;
+		dir.x = -raydir.x;
+		xor |= 4;
+	}
+	if (raydir.y < 0.0)
+	{
+		orig.y = oct->GetCentre().y - rayorig.y;
+		dir.y = -raydir.y;
+		xor |= 2;
+	}
+	if (raydir.z < 0.0)
+	{
+		orig.z = oct->GetCentre().z - rayorig.z;
+		dir.z = -raydir.z;
+		xor |= 1;
+	}
+
+	float tx0 = (oct->xmin - orig.x) / dir.x;
+	float tx1 = (oct->xmax - orig.x) / dir.x;
+	float ty0 = (oct->ymin - orig.y) / dir.y;
+	float ty1 = (oct->ymax - orig.y) / dir.y;
+	float tz0 = (oct->zmin - orig.z) / dir.z;
+	float tz1 = (oct->zmax - orig.z) / dir.z;
+
+	if (std::max(std::max(tx0, ty0), tz0) < std::min(std::min(tx1, ty1), tz1))
+		sphere = oct->Trace(rayOrig, rayDir, tx0, ty0, tz0, tx1, ty1, tz1, xor, tnear);
+#else
+
 	// find intersection of this ray with the sphere in the scene
 	for (unsigned i = 0; i < spheres.size(); ++i) {
 		float t0 = INFINITY, t1 = INFINITY;
@@ -89,6 +126,7 @@ Vec3f trace(
 			}
 		}
 	}
+#endif
 	// if there's no intersection return black or background color
 	if (!sphere) return Vec3f(2);
 	Vec3f surfaceColor = 0; // color of the ray/surfaceof the object intersected by the ray
@@ -161,7 +199,7 @@ int32_t traceThreaded(uint64_t arg)
 			float yy = (1 - 2 * ((y + 0.5) * wrapper->invHeight)) * wrapper->angle;
 			Vec3f raydir(xx, yy, -1);
 			raydir.normalize();
-			Vec3f pixel = trace(Vec3f(0), raydir, *wrapper->spheres, 0);
+			Vec3f pixel = trace(Vec3f(0), raydir, *wrapper->spheres, 0, wrapper->octree);
 			wrapper->image[int(x + y * wrapper->imageWidth)] = pixel;
 		}
 	}
@@ -187,6 +225,9 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 
 	//if (ret != SCE_OK)
 	//	return ret;
+
+	Octree* oct = new Octree(Vec3f());
+	oct->Create(spheres, 50.0f);
 
 	//unsigned width = 1920, height = 1080;
 	unsigned width = 640, height = 480;
@@ -226,6 +267,7 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 		wrapper.invHeight = invHeight;
 		wrapper.aspectRatio = aspectratio;
 		wrapper.angle = angle;
+		wrapper.octree = oct;
 		uint64_t arg = (uint64_t)&wrapper;
 
 		sceUltUlthreadCreate(&traceThreads[i],
@@ -261,6 +303,7 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 			(unsigned char)(std::min(float(1), image[i].z) * 255);
 	}
 	ofs.close();
+	delete oct;
 }
 
 void LoadScene(std::vector<Sphere*>& spheres)
@@ -294,76 +337,6 @@ void BasicRender(int iteration)
 	render(spheres, iteration);
 
 	for (Sphere* sphere : spheres)
-		delete sphere;
-}
-
-void SimpleShrinking()
-{
-	std::vector<Sphere*> garbage;
-	std::vector<std::thread> renderThreads;
-	// Vector structure for Sphere (position, radius, surface color, reflectivity, transparency, emission color)
-
-	for (int i = 0; i < 4; i++)
-	{
-		std::vector<Sphere*> spheres;
-		LoadScene(spheres);
-
-		if (i == 0)
-		{
-			spheres[1]->radius = 4;
-			spheres[1]->radius2 = 16;
-		}
-		else if (i == 1)
-		{
-			spheres[1]->radius = 3;
-			spheres[1]->radius2 = 9;
-		}
-		else if (i == 2)
-		{
-			spheres[1]->radius = 2;
-			spheres[1]->radius2 = 4;
-		}
-		else if (i == 3)
-		{
-			spheres[1]->radius = 1;
-			spheres[1]->radius2 = 1;
-		}
-
-		renderThreads.push_back(std::thread(render, spheres, i));
-		//render(spheres, i);
-		garbage.insert(std::end(garbage), std::begin(spheres), std::end(spheres));
-	}
-
-	for (std::thread& thread : renderThreads)
-		if (thread.joinable())
-			thread.join();
-
-	for (Sphere* sphere : garbage)
-		delete sphere;
-}
-
-void SmoothScaling()
-{
-	std::vector<Sphere*> garbage;
-	std::vector<std::thread> renderThreads;
-
-	for (float r = 0; r <= 100; r++)
-	{
-		std::vector<Sphere*> spheres;
-		LoadScene(spheres);
-
-		spheres[1]->radius = r / 100;
-		spheres[1]->radius2 = (r / 100) * (r / 100);
-		renderThreads.push_back(std::thread(render, spheres, r));
-		//render(spheres, r);
-		garbage.insert(std::end(garbage), std::begin(spheres), std::end(spheres));
-	}
-
-	for (std::thread& thread : renderThreads)
-		if (thread.joinable())
-			thread.join();
-
-	for (Sphere* sphere : garbage)
 		delete sphere;
 }
 

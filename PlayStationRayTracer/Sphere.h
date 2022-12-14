@@ -76,7 +76,7 @@ public:
 
 	bool IntersectsLine(const Vec3f& rayorig, const Vec3f& raydir, float& distanceSq);
 
-	bool IntersectsLine(Vec3f start, Vec3f end);
+	bool IntersectsPlane(Vec3f pointOnPlane, Vec3f planeNormal);
 
 	void* operator new(size_t size);
 

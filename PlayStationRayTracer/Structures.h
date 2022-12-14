@@ -5,6 +5,7 @@
 #include <vector>
 #include "Tracker.h"
 #include "Sphere.h"
+#include "Octree.h"
 
 struct Header
 {
@@ -35,5 +36,6 @@ struct TraceWrapper
 	float invHeight;
 	float aspectRatio;
 	float angle;
+	Octree* octree;
 };
 #endif
