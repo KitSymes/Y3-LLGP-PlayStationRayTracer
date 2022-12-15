@@ -18,7 +18,7 @@ public:
 	~Octree();
 
 	void Create(std::vector<Sphere*> spheres, float sideLength);
-	Sphere* Trace(const Vec3f& rayorig, const Vec3f& raydir, float tx0, float ty0, float tz0, float tx1, float ty1, float tz1, unsigned char xor, float& tnear);
+	Sphere* Trace(const Vec3f& rayorig, const Vec3f& raydir, float tx0, float ty0, float tz0, float tx1, float ty1, float tz1, unsigned char x, float& tnear);
 
 	float sideLength;
 	float xmin, xmax;

@@ -46,6 +46,7 @@ static const int num_threads = 10;
 #define THREADS 64 // 4 to the power of SUBDIVIDE_COUNT
 #define SPLIT 8 // 2 to the power of SUBDIVIDE_COUNT
 #define OCTREE true
+#define COUNT 10
 
 using namespace sce;
 using namespace sce::Gnmx;
@@ -81,7 +82,7 @@ Vec3f trace(
 	float tnear = INFINITY;
 	const Sphere* sphere = NULL;
 #if OCTREE
-	unsigned charxor = 0;
+	unsigned char x = 0;
 	Vec3f dir = raydir;
 	Vec3f orig = rayorig;
 
@@ -89,19 +90,19 @@ Vec3f trace(
 	{
 		orig.x = oct->GetCentre().x - rayorig.x;
 		dir.x = -raydir.x;
-		xor |= 4;
+		x |= 4;
 	}
 	if (raydir.y < 0.0)
 	{
 		orig.y = oct->GetCentre().y - rayorig.y;
 		dir.y = -raydir.y;
-		xor |= 2;
+		x |= 2;
 	}
 	if (raydir.z < 0.0)
 	{
 		orig.z = oct->GetCentre().z - rayorig.z;
 		dir.z = -raydir.z;
-		xor |= 1;
+		x |= 1;
 	}
 
 	float tx0 = (oct->xmin - orig.x) / dir.x;
@@ -112,7 +113,7 @@ Vec3f trace(
 	float tz1 = (oct->zmax - orig.z) / dir.z;
 
 	if (std::max(std::max(tx0, ty0), tz0) < std::min(std::min(tx1, ty1), tz1))
-		sphere = oct->Trace(rayOrig, rayDir, tx0, ty0, tz0, tx1, ty1, tz1, xor, tnear);
+		sphere = oct->Trace(rayorig, raydir, tx0, ty0, tz0, tx1, ty1, tz1, x, tnear);
 #else
 
 	// find intersection of this ray with the sphere in the scene
@@ -148,7 +149,7 @@ Vec3f trace(
 		// are already normalized)
 		Vec3f refldir = raydir - nhit * 2 * raydir.dot(nhit);
 		refldir.normalize();
-		Vec3f reflection = trace(phit + nhit * bias, refldir, spheres, depth + 1);
+		Vec3f reflection = trace(phit + nhit * bias, refldir, spheres, depth + 1, oct);
 		Vec3f refraction = 0;
 		// if the sphere is also transparent compute refraction ray (transmission)
 		if (sphere->transparency) {
@@ -157,7 +158,7 @@ Vec3f trace(
 			float k = 1 - eta * eta * (1 - cosi * cosi);
 			Vec3f refrdir = raydir * eta + nhit * (eta * cosi - sqrt(k));
 			refrdir.normalize();
-			refraction = trace(phit - nhit * bias, refrdir, spheres, depth + 1);
+			refraction = trace(phit - nhit * bias, refrdir, spheres, depth + 1, oct);
 		}
 		// the result is a mix of reflection and refraction (if the sphere is transparent)
 		surfaceColor = (
@@ -193,8 +194,8 @@ Vec3f trace(
 int32_t traceThreaded(uint64_t arg)
 {
 	TraceWrapper* wrapper = (TraceWrapper*)arg;
-	for (unsigned y = wrapper->startY; y < wrapper->imageHeight && y < wrapper->startY + wrapper->sizeY; ++y) {
-		for (unsigned x = wrapper->startX; x < wrapper->imageWidth && x < wrapper->startX + wrapper->sizeX; ++x) {
+	for (int y = wrapper->startY; y < wrapper->imageHeight && y < wrapper->startY + wrapper->sizeY; y++) {
+		for (int x = wrapper->startX; x < wrapper->imageWidth && x < wrapper->startX + wrapper->sizeX; x++) {
 			float xx = (2 * ((x + 0.5) * wrapper->invWidth) - 1) * wrapper->angle * wrapper->aspectRatio;
 			float yy = (1 - 2 * ((y + 0.5) * wrapper->invHeight)) * wrapper->angle;
 			Vec3f raydir(xx, yy, -1);
@@ -242,7 +243,7 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 	float fov = 30, aspectratio = width / float(height);
 	float angle = tan(M_PI * 0.5 * fov / 180.);
 
-	uint32_t maxNumUlthread = 10;// height / TRACE_THREAD_PER_LINES;
+	uint32_t maxNumUlthread = THREADS;
 	uint32_t numWorkerThread = 3;
 	void* runtimeWorkArea = malloc(sceUltUlthreadRuntimeGetWorkAreaSize(maxNumUlthread, numWorkerThread));
 	SceUltUlthreadRuntime runtime;
@@ -250,25 +251,24 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 	assert(ret == SCE_OK);
 
 	SceUltUlthread traceThreads[THREADS];
-	//std::vector<SceUltUlthread> traceThreads;
+	TraceWrapper traceWrappers[THREADS];
 
 	for (unsigned int i = 0; i < THREADS; i++)
 	{
-		TraceWrapper wrapper;
-		wrapper.spheres = &spheres;
-		wrapper.image = image;
-		wrapper.sizeX = width / SPLIT;
-		wrapper.sizeY = height / SPLIT;
-		wrapper.startX = (i / SPLIT) * wrapper.sizeX;
-		wrapper.startY = (i % SPLIT) * wrapper.sizeY;
-		wrapper.imageWidth = width;
-		wrapper.imageHeight = height;
-		wrapper.invWidth = invWidth;
-		wrapper.invHeight = invHeight;
-		wrapper.aspectRatio = aspectratio;
-		wrapper.angle = angle;
-		wrapper.octree = oct;
-		uint64_t arg = (uint64_t)&wrapper;
+		traceWrappers[i].spheres = &spheres;
+		traceWrappers[i].image = image;
+		traceWrappers[i].sizeX = width / SPLIT;
+		traceWrappers[i].sizeY = height / SPLIT;
+		traceWrappers[i].startX = (i / SPLIT) * traceWrappers[i].sizeX;
+		traceWrappers[i].startY = (i % SPLIT) * traceWrappers[i].sizeY;
+		traceWrappers[i].imageWidth = width;
+		traceWrappers[i].imageHeight = height;
+		traceWrappers[i].invWidth = invWidth;
+		traceWrappers[i].invHeight = invHeight;
+		traceWrappers[i].aspectRatio = aspectratio;
+		traceWrappers[i].angle = angle;
+		traceWrappers[i].octree = oct;
+		uint64_t arg = (uint64_t)&traceWrappers[i];
 
 		sceUltUlthreadCreate(&traceThreads[i],
 			"trace thread",
@@ -308,7 +308,7 @@ void render(const std::vector<Sphere*>& spheres, int iteration)
 
 void LoadScene(std::vector<Sphere*>& spheres)
 {
-	std::ifstream f("/app0/scene.json");
+	std::ifstream f("/app0/scene2.json");
 	nlohmann::json data = nlohmann::json::parse(f);
 
 	for (nlohmann::json::iterator it = data["spheres"].begin(); it != data["spheres"].end(); ++it) {
@@ -357,7 +357,7 @@ int main(int argc, char** argv)
 	using std::chrono::duration;
 	using std::chrono::milliseconds;
 
-	int count = 1;
+	int count = COUNT;
 	int total = 0;
 	for (int i = 0; i < count; i++)
 	{
@@ -373,7 +373,7 @@ int main(int argc, char** argv)
 
 	std::cout << (total / count) << " average ms seconds\n";
 
-	/* libult finalize 
+	/* libult finalize
 	ret = sceUltFinalize();
 	assert(ret == SCE_OK);
 
