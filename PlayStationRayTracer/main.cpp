@@ -373,13 +373,6 @@ int main(int argc, char** argv)
 
 	std::cout << (total / count) << " average ms seconds\n";
 
-	/* libult finalize
-	ret = sceUltFinalize();
-	assert(ret == SCE_OK);
-
-	ret = sceSysmoduleUnloadModule(SCE_SYSMODULE_ULT);
-	assert(ret == SCE_OK);*/
-
 	return 0;
 }
 

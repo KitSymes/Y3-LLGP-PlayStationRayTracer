@@ -34,8 +34,6 @@ TrackerManager::TrackerManager()
 	sceUltWaitingQueueResourcePoolCreate(&waitingQueueResourcePool, "Thread Manager Waiting Queue", numThreads, numSyncObjects, workArea, NULL);
 	_defaultTracker.Setup("Default Tracker", &waitingQueueResourcePool);
 	_sphereTracker.Setup("Sphere Tracker", &waitingQueueResourcePool);
-	//_defaultTracker = new Tracker("Default Tracker Mutex", &waitingQueueResourcePool);
-	//_sphereTracker = new Tracker("Dummy Tracker Mutex", &waitingQueueResourcePool);
 }
 
 TrackerManager::~TrackerManager()
@@ -43,8 +41,4 @@ TrackerManager::~TrackerManager()
 	int32_t ret = sceUltWaitingQueueResourcePoolDestroy(&waitingQueueResourcePool);
 	assert(ret == SCE_OK);
 	free(workArea);
-	/*delete _sphereTracker;
-	_sphereTracker = nullptr;
-	delete _defaultTracker;
-	_defaultTracker = nullptr;*/
 }

@@ -50,21 +50,6 @@ void Tracker::Add(Header* header)
 		if (_last->checkvalue != 0xDEAD)
 			std::cout << "ERROR" << std::endl;
 
-
-		bool b1 = (_last != _first && _last->prev->next == nullptr);
-		//bool b2 = _last->next != nullptr;
-		//bool b5 = _last->next == nullptr;
-		bool b4 = _last->next;
-		//bool b6 = !_last->next;
-
-		if (b1 || b4)
-		{
-			//_last->next = nullptr;
-			//bool b3 = _last->next != nullptr;
-
-			std::cout << (void*)_last->next;
-			std::cout << "ERROR " << (_last->next != nullptr) << " " << (_last != _first && _last->prev->next == nullptr) << std::endl;
-		}
 		header->prev = _last;
 		_last->next = header;
 	}
@@ -78,18 +63,6 @@ void Tracker::Add(Header* header)
 		if (header->prev->checkvalue != 0xDEAD)
 			Verify(header);
 
-	/*// Pointing to a header pointer, so it's pointing to _first or ->next
-	Header** pointerToHeaderPointer = &_first;
-	Header* pointerToPreviousHeader = nullptr;
-
-	while (*pointerToHeaderPointer != nullptr)
-	{
-		pointerToPreviousHeader = *pointerToHeaderPointer;
-		pointerToHeaderPointer = &pointerToPreviousHeader->next;
-	}
-	(*pointerToHeaderPointer) = header;
-	if (pointerToPreviousHeader != nullptr)
-		header->prev = pointerToPreviousHeader;*/
 	sceUltMutexUnlock(&mutex);
 }
 
